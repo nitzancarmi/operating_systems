@@ -105,14 +105,12 @@ int clear_temp_resources(struct file *src,
 
     int _rc = 0;
     if (lseek(key->id, 0, SEEK_SET) < 0)
-        return 1;
+        _rc = 1;
     _rc |= close(src->id);
     _rc |= close(tgt->id);
-    if (_rc)
-        return 1;
     free(src->path);
     free(tgt->path);
-    return 0;
+    return _rc;
 }
 
 int generate_key(struct file *key) {
@@ -258,11 +256,15 @@ int main ( int argc, char *argv[]) {
     //iterate over src dir files
     while ((src_dir->entry = readdir(src_dir->id))) {
 
-        //open source file
+        //get file's path
         if(is_ignored(src_dir->entry->d_name))
             continue;
         sprintf(path_buf, "%s/%s", src_dir->path, src_dir->entry->d_name);
         src->path = strdup(path_buf);
+        sprintf(path_buf, "%s/%s", tgt_dir->path, src_dir->entry->d_name);
+        tgt->path = strdup(path_buf);
+
+        //open source file
         src->id = open(src->path,(int)RO);
         if (src->id < 0) {
             printf("ERROR: Failed to open source file [%s]\n"
@@ -283,8 +285,6 @@ int main ( int argc, char *argv[]) {
         }
 
         //open target file
-        sprintf(path_buf, "%s/%s", tgt_dir->path, src_dir->entry->d_name);
-        tgt->path = strdup(path_buf);
         tgt->id = creat(tgt->path, RW);
         if (tgt->id < 0) {
             printf("ERROR: Failed to open target file [%s]\n"
