@@ -16,12 +16,21 @@
 #define PIPE_FILENAME   "osfifo"
 #define PERMISSIONS     0600
 #define BUFSIZE         4096
-#define TIMEOUT         60
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+//global contains default mask to return to
+//HAS to be shared with all functions
+sigset_t old_mask;
 
 
 void usage(char* filename);
 int is_exist(char* filename);
+
+struct handler_args {
+    siginfo_t   *siginfo;
+    char*       fpath;
+    int         fd;  
+};
 
 void usage(char* filename) {
     printf("Usage: %s <%s>\n"
@@ -35,7 +44,6 @@ int is_exist(char* filename) {
 }
 
 static void clean_and_exit (int sig) {
-    printf("INSIDE SIGNAL HANDLING!\n");
     char    fpath[1024] = {'\0'};
     int rc;
 
@@ -45,6 +53,12 @@ static void clean_and_exit (int sig) {
         printf("error: failed to unlink file [%s]\n"
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
+    }
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
+            printf("ERROR: Failed to allow back SIGINT\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            rc = -1;
     }
     exit(rc);
 }
@@ -70,6 +84,18 @@ int main ( int argc, char *argv[]) {
     struct  timeval t1, t2;
     struct sigaction sa;
     memset(&sa, 0, sizeof(struct sigaction));
+    sigset_t mask;
+
+    //set mask to ignore SIGINT
+    sigemptyset (&mask);
+    sigaddset (&mask, SIGINT);
+    if (sigprocmask(SIG_BLOCK, &mask, &old_mask) < 0) {
+            printf("ERROR: Failed to block SIGINT\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            rc = -1;
+            goto exit;
+    }
 
     //create FIFO file
     sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
@@ -111,28 +137,27 @@ int main ( int argc, char *argv[]) {
         printf("error: failed to create sigaction\n"
                "cause: %s [%d]\n",
                strerror(errno), errno);
-       return -1;
+       goto cleanup;
     }
 
     //start measurements
     rc = gettimeofday(&t1, NULL);
     if (rc) {
        printf("ERROR: Failed to measure time\n"
-               "Cause: %s [%d]\n",
-               strerror(errno), errno);
+              "Cause: %s [%d]\n",
+              strerror(errno), errno);
         goto cleanup;
     }
 
     //write to file
     b_left = size;
-    printf("Start!\n");
     while(b_left > 0) {
         b_to_write = MIN(b_left, BUFSIZE);
         b_write = write(fd,(char*)buf, sizeof(char) * b_to_write);
         if (b_write < 0) {
-            printf("ERROR: Failed to measure time\n"
+            printf("ERROR: Failed to write to file [%s]\n"
                    "Cause: %s [%d]\n",
-                   strerror(errno), errno);
+                   fpath, strerror(errno), errno);
             rc = -1;
             goto cleanup;
         }
@@ -155,12 +180,19 @@ int main ( int argc, char *argv[]) {
            size, elapsed_msec);
 
 cleanup:
-    rc = unlink(fpath);
-    if(rc) {
-        printf("writer: failed to unlink file [%s]\n"
+    _rc = unlink(fpath);
+    if(_rc) {
+        printf("ERROR: failed to unlink file [%s]\n"
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
     }
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
+            printf("ERROR: Failed to allow back SIGINT\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            _rc = -1;
+    }
+    rc |= rc;
 exit:
     return rc;
 }

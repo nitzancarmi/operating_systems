@@ -48,7 +48,18 @@ int main ( int argc, char *argv[]) {
     struct  timeval t1, t2;
     double  elapsed_msec;
     ssize_t b_read;
+    sigset_t mask, old_mask;
 
+    //set mask to ignore SIGINT
+    sigemptyset (&mask);
+    sigaddset (&mask, SIGINT);
+    if (sigprocmask(SIG_BLOCK, &mask, &old_mask) < 0) {
+            printf("ERROR: Failed to block SIGINT\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            rc = -1;
+            goto exit;
+    }
     //create FIFO file
     sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
     if(!is_exist(fpath)) {
@@ -64,7 +75,7 @@ int main ( int argc, char *argv[]) {
     //open file
     fd = open(fpath, O_RDONLY);
     if (fd < 0) {
-        printf("reader: Failed to open file [%s]\n"
+        printf("ERROR: Failed to open file [%s]\n"
                "Cause: %s [%d]\n",
                fpath, strerror(errno), errno);
         rc = -1;
@@ -114,9 +125,15 @@ int main ( int argc, char *argv[]) {
 cleanup:
     _rc = close(fd);
     if(_rc) {
-        printf("reader: failed to unlink file [%s]\n"
+        printf("ERROR: failed to unlink file [%s]\n"
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
+    }
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
+            printf("ERROR: Failed to allow back SIGINT\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            _rc = -1;
     }
     rc |= _rc;
 exit:

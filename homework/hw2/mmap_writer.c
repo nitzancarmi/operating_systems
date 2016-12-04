@@ -44,6 +44,18 @@ int main ( int argc, char *argv[]) {
     struct  timeval t1, t2;
     double  elapsed_msec;
 
+    //ignore SIGTERM signal
+    sigset_t mask, old_mask;
+    sigemptyset (&mask);
+    sigaddset (&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, &old_mask) < 0) {
+            printf("ERROR: Failed to block SIGTERM\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            rc = -1;
+            goto exit;
+    }
+
     //open file
     sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
     fd = open(fpath, O_RDWR | O_CREAT);
@@ -51,7 +63,7 @@ int main ( int argc, char *argv[]) {
         printf("ERROR: Failed to create file [%s]\n"
                "Cause: %s [%d]\n",
                fpath, strerror(errno), errno);
-        rc = 1;
+        rc = -1;
         goto cleanup;
     }
 
@@ -68,7 +80,7 @@ int main ( int argc, char *argv[]) {
     size = (size_t)strtol(argv[1], &end_ptr, 10);
     if (!size) {
         printf("ERROR: Invalid file size: [%lu]\n", size);
-        rc = 1;
+        rc = -1;
         goto cleanup;
     } 
 
@@ -92,7 +104,7 @@ int main ( int argc, char *argv[]) {
         printf("ERROR: Failed to mmap file [%s]\n"
                "Cause: %s [%d]\n",
                fpath, strerror(errno), errno);
-        rc = 1;
+        rc = -1;
         goto cleanup;
     }
 
@@ -139,7 +151,13 @@ cleanup:
         printf("ERROR: Failed to clean resources\n"
                "Cause: %s [%d]\n",
                strerror(errno), errno);
-               rc = 1;
+               rc = -1;
+    }
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
+            printf("ERROR: Failed to allow back SIGTERM\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            _rc = -1;
     }
     rc |= _rc;
 exit:

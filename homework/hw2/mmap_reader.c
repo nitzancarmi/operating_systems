@@ -16,6 +16,10 @@
 #define PIPE_FILENAME   "mmapped.bin"
 #define PERMISSIONS      0600
 
+//global contains default mask to return to
+//HAS to be shared with all functions
+sigset_t old_mask;
+
 void usage(char* filename);
 
 
@@ -43,7 +47,7 @@ static void handle_sigusr1 (int sig) {
         printf("ERROR: Failed to open file [%s]\n"
                "Cause: %s [%d]\n",
                fpath, strerror(errno), errno);
-        rc = 1;
+        rc = -1;
         goto cleanup;
     }
 
@@ -77,7 +81,7 @@ static void handle_sigusr1 (int sig) {
         printf("ERROR: Failed to mmap file [%s]\n"
                "Cause: %s [%d]\n",
                fpath, strerror(errno), errno);
-        rc = 1;
+        rc = -1;
         goto cleanup;
     }
 
@@ -110,6 +114,12 @@ cleanup:
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
     }
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
+            printf("ERROR: Failed to allow back SIGTERM\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            rc = -1;
+    }
     exit(0);
 }
 
@@ -118,14 +128,22 @@ int main ( int argc, char *argv[]) {
     //validate 3 command line arguments given
     if (argc != 1) {
         usage(argv[0]);
-        return 1;
+        return -1;
     }
 
     int rc;
-    //declerations:
+    sigset_t mask;
+    sigemptyset (&mask);
+    sigaddset (&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, &old_mask) < 0) {
+            printf("ERROR: Failed to block SIGTERM\n"
+                   "Cause: %s [%d]\n",
+                   strerror(errno), errno);
+            return -1;
+    }
+
     struct sigaction sa;
     memset(&sa, 0, sizeof(struct sigaction));
-//    sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sa.sa_handler = handle_sigusr1;
     rc = sigaction(SIGUSR1, &sa, NULL);
@@ -133,13 +151,13 @@ int main ( int argc, char *argv[]) {
         printf("error: failed to create sigaction\n"
                "cause: %s [%d]\n",
                strerror(errno), errno);
-        return 1;
-       }
+        return -1;
+    }
 
     while(1) {
         sleep(2);
     }
 
     //shouldn't ever get here
-    return 1;
+    return -1;
 }
