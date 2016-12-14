@@ -20,16 +20,11 @@
 
 
 void usage(char* filename);
-int is_exist(char* filename);
 
 void usage(char* filename) {
     printf("Usage: %s \n"
            "Aborting...\n",
             filename);
-}
-
-int is_exist(char* filename) {
-    return (access(filename,F_OK) != -1);
 }
 
 int main ( int argc, char *argv[]) {
@@ -60,19 +55,13 @@ int main ( int argc, char *argv[]) {
             rc = -1;
             goto exit;
     }
-    //create FIFO file
-    sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
-    if(!is_exist(fpath)) {
-        rc = mkfifo(fpath, PERMISSIONS);
-        if (rc) {
-            printf("ERROR: Failed to create fifo file [%s]\n"
-                   "Cause: %s [%d]\n",
-                   fpath, strerror(errno), errno);
-            goto exit;
-        }
-    }
+
+    //wait for 1 second to avoid sync problem
+    //(in case writer hasnt created fifo file yet)
+    sleep(1);
 
     //open file
+    sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
     fd = open(fpath, O_RDONLY);
     if (fd < 0) {
         printf("ERROR: Failed to open file [%s]\n"
@@ -119,23 +108,26 @@ int main ( int argc, char *argv[]) {
     elapsed_msec += (t2.tv_usec - t1.tv_usec) / 1000.0;
 
     //print results
-    printf("%d bytes were read in %f microseconds through FIFO\n",
+    printf("%d bytes were read in %f miliseconds through FIFO\n",
            a_count, elapsed_msec);
 
 cleanup:
     _rc = close(fd);
     if(_rc) {
-        printf("ERROR: failed to unlink file [%s]\n"
+        printf("ERROR: failed to close file [%s]\n"
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
+        if(!rc)
+            rc = _rc;
     }
     if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
             printf("ERROR: Failed to allow back SIGINT\n"
                    "Cause: %s [%d]\n",
                    strerror(errno), errno);
-            _rc = -1;
+        if(!rc)
+            rc = -1;
     }
-    rc |= _rc;
+
 exit:
     return rc;
 

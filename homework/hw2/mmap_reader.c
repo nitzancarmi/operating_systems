@@ -35,7 +35,7 @@ static void handle_sigusr1 (int sig) {
     char fpath[1024] = {'\0'};;
     struct  timeval t1, t2;
     ssize_t fsize;
-    int rc, fd;
+    int _rc, rc, fd;
     double elapsed_msec;
     struct stat fstat;
     memset(&fstat, 0, sizeof(struct stat));
@@ -86,11 +86,16 @@ static void handle_sigusr1 (int sig) {
     }
 
     //count the number of a's (and single '\0' at the end)
-    int i = 0, count = 1;
+    int i = 0, count = 0;
     while(fmap[i]) {
-        if(fmap[i++] == 'a')
+        if(fmap[i++] == 'a') {
             count++;
+        }
     }
+
+    //if exited with \0 (and not by signal for example),
+    //add 1 to the byte count, as asked in instructions
+    count += (!fmap[i]);
 
     // finish measurement   
     rc = gettimeofday(&t2, NULL);
@@ -104,22 +109,36 @@ static void handle_sigusr1 (int sig) {
     elapsed_msec += (t2.tv_usec - t1.tv_usec) / 1000.0;
 
     //print results
-    printf("%d bytes were read in %f microseconds through MMAP\n",
+    printf("%d bytes were read in %f miliseconds through MMAP\n",
            count, elapsed_msec);
 
 cleanup:
-    rc = unlink(fpath);
-    if(rc) {
-       printf("error: failed to unlink file [%s]\n"
+    _rc = close(fd);
+    if(_rc) {
+        printf("ERROR: failed to close file [%s]\n"
                "cause: %s [%d]\n",
                fpath, strerror(errno), errno);
+        if(!rc)
+            rc = _rc;
     }
+
+    _rc = unlink(fpath);
+    if(_rc) {
+        printf("error: failed to unlink file [%s]\n"
+               "cause: %s [%d]\n",
+               fpath, strerror(errno), errno);
+        if(!rc)
+            rc = _rc;
+    }
+
     if (sigprocmask(SIG_SETMASK, &old_mask, NULL) < 0) {
             printf("ERROR: Failed to allow back SIGTERM\n"
                    "Cause: %s [%d]\n",
                    strerror(errno), errno);
-            rc = -1;
+        if(!rc)
+            rc = _rc;
     }
+
     exit(0);
 }
 

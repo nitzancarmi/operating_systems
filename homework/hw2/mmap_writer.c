@@ -58,7 +58,7 @@ int main ( int argc, char *argv[]) {
 
     //open file
     sprintf((char*)fpath, "%s/%s", PIPE_PATH, PIPE_FILENAME);
-    fd = open(fpath, O_RDWR | O_CREAT);
+    fd = open(fpath, O_RDWR | O_CREAT | O_TRUNC);
     if (fd < 0) {
         printf("ERROR: Failed to create file [%s]\n"
                "Cause: %s [%d]\n",
@@ -116,8 +116,10 @@ int main ( int argc, char *argv[]) {
                strerror(errno), errno);
         goto cleanup;
     }
+
     memset(fmap, 'a', sizeof(char) * size);
     fmap[size-1] = '\0';
+
     rc = gettimeofday(&t2, NULL);
     if (rc) {
        printf("ERROR: Failed to measure time\n"
@@ -138,7 +140,7 @@ int main ( int argc, char *argv[]) {
     }
 
     //print results
-    printf("%lu bytes were written in %f microseconds through MMAP\n",
+    printf("%lu bytes were written in %f miliseconds through MMAP\n",
            size, elapsed_msec);
 
 cleanup:
