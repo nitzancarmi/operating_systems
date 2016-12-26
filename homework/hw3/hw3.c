@@ -9,8 +9,11 @@
 #include<errno.h>
 #include <linux/mutex.h>
 #include<pthread.h>
+#include<time.h>
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+static pthread_cond_t *wakeup_gc;
 
 struct intlist_entry {
     int data;
@@ -82,7 +85,7 @@ void intlist_init(intlist_attr *list) {
     }
     memset(list, 0, sizeof(intlist_attr));
 
-    rc = pthread_mutex_init(list->lock);
+    rc = pthread_mutex_init(list->lock, PTHREAD_MUTEX_RECURSIVE);
     if (rc) {
         printf("%s: mutex init failed\n",
                __func__);
@@ -187,7 +190,7 @@ void intlist_push_head(intlist_attr *list, int value) {
     }
     /**CS**/
     list->size += 1;
-    if(!list->first) { //i.e first element to be inserted
+    if (!list->first) { //i.e first element to be inserted
         list->first = entry;
         list->last = entry;
         pthread_cond_signal(list->nonempty);
@@ -196,6 +199,8 @@ void intlist_push_head(intlist_attr *list, int value) {
         list->first->prev = entry;
         list->first = entry;
     }
+    if (list->size == list->capacity)
+        pthread_cond_signal(wakeup_gc);
     /**CS-END**/
 
     rc = pthread_mutex_unlock(list->lock);
@@ -305,6 +310,41 @@ pthread_mutex_t* intlist_get_mutex(intlist_attr *list) {
     return list->lock;
 }
 
+void intlist_garbage_collector(intlist_attr *list) {
+    int rc;
+    int num_to_delete;
+
+    rc = pthread_mutex_lock(list->lock);
+    if (rc) {
+            printf("%s: mutex lock failed\n",
+               __func__);
+        return;
+    }
+
+    while(true) {
+        rc = pthread_cond_wait(wakeup_gc, list->lock);
+        if (rc) {
+            printf("%s: mutex conditional wait failed\n",
+                   __func__);
+            return;
+        }
+        num_to_delete = (list->size)/2 + (list->size)%2;
+        intlist_remove_last_k(list, num_to_delete);
+        printf("GC – %d items removed from the list", num_to_delete);
+    }
+}
+
+void intlist_writer(intlist_attr *list) {
+    srand((unsigned int)time(NULL));
+    while(true)
+        intlist_push_head(rand(), list);
+}
+
+void intlist_reader(intlist_attr *list) {
+    while(true)
+        intlist_pop_tail(list);
+}
+
 /***/
 
 int main ( int argc, char *argv[]) {
@@ -316,12 +356,12 @@ int main ( int argc, char *argv[]) {
     }
 
     intlint_attr *list;
-    int rc;
+    intlist_entry *curr;
+    int rc, i;
     int wnum, rnum;
     int max_size;
     time_t duration;
     pthread_t gc;
-    pthread_cond_t *gc_wakeup;
 
     wnum        = (int)strtol(argv[1], NULL, 10);
     rnum        = (int)strtol(argv[2], NULL, 10);
@@ -331,27 +371,78 @@ int main ( int argc, char *argv[]) {
         printf("ERROR: Invalid command-line arguments\n");
         usage(argv[0]);
         rc = -1;
+        goto exit;
     }
 
     /*initialize list*/
     intlist_init(list);
     list->capacity = max_size;
 
-    /*initialize garbage collector*/
-    rc = pthread_cond_init(gc_wakeup, NULL);
+    /*initialize garbage collector thread*/
+    rc = pthread_cond_init(wakeup_gc, NULL);
     if (rc) {
         printf("%s: GC condition init failed\n",
                __func__);
-        return rc;
+        intlist_destroy(list);
+        goto exit;
     }
-    rc = pthread_create(&gc, NULL, garbage_collector, &gc_wakeup);
+    rc = pthread_create(&gc, NULL, intlist_garbage_collector, list);
     if (rc) {
         printf("%s: GC thread creation failed\n",
                __func__);
-        return rc;
+        goto cleanup;
     }
 
-    
- 
-    return rc;
+    /*generate readers and writers threads*/
+    pthread_t readers_threads[rnum];
+    for (i=0; i < rnum; i++) {
+        rc = pthread_create(&readers_threads[i], NULL, intlist_reader, list);
+        if (rc) {
+            printf("%s: reader %d thread creation failed\n",
+                   __func__, i);
+            goto cleanup;
+        }
+    }
+    pthread_t writers_threads[wnum];
+    for (i=0; i < wnum; i++) {
+        rc = pthread_create(&writers_threads[i], NULL, intlist_reader, list);
+        if (rc) {
+            printf("%s: writer %d thread creation failed\n",
+                   __func__, i);
+            goto cleanup;
+        }
+    }
+
+    /*sleep for a given time */
+    sleep(duration);
+
+    /*clean all running threads*/
+    rc = pthread_mutex_lock(list->lock);
+    if (rc) {
+            printf("%s: mutex lock failed\n",
+               __func__);
+        goto cleanup;
+    }
+
+    //now main holds all resources, safe to cancel threads
+    rc = pthread_cancel(gc);
+    for (i=0; i < rnum; rc |= pthread_cancel(&readers_threads[i++]));
+    for (i=0; i < wnum; rc |= pthread_cancel(&writers_threads[i++]));
+    if (rc) {
+        printf("%s: closing threads failed\n",
+               __func__);
+        goto cleanup;
+    }
+
+    //print list size & elements
+    printf("list size: %d\n", list->size);
+    printf("list elements:");
+    for(curr = list->first; curr; curr = curr->next)
+        printf(" %d", curr->data);
+
+cleanup:
+    intlist_destroy(list);
+    pthread_cond_destroy(wakeup_gc);
+exit: 
+    pthread_exit(&rc);
 }
