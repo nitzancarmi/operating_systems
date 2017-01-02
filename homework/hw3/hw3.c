@@ -12,9 +12,9 @@
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-static bool stop;
-
 static pthread_cond_t wakeup_gc;
+
+static int stop;
 
 typedef struct intlist_entry_t {
     int                     data;
@@ -152,10 +152,9 @@ void intlist_push_head(intlist_t *list, int value) {
     printf("writer: taken!\n");
  
     //while list is full, no items can be pushed to list
-    while(list->size == list->capacity) {
+    while(list->size == list->capacity && !stop) {
         printf("writer: entering wait...\n");
         rc = pthread_cond_wait(&list->nonfull, &list->lock);
-        pthread_testcancel();
         if (rc) {
             printf("%s: mutex conditional wait failed\n",
                    __func__);
@@ -201,10 +200,9 @@ int intlist_pop_tail(intlist_t *list) {
     }
     printf("reader: taken!\n");
     //while list is empty, no items can be popped from list
-    while(list->size == 0) {
+    while(list->size == 0 && !stop) {
         printf("reader: entering wait...\n");
         rc = pthread_cond_wait(&list->nonempty, &list->lock);
-        pthread_testcancel();
         if (rc) {
             printf("%s: mutex conditional wait failed\n",
                    __func__);
@@ -216,10 +214,10 @@ int intlist_pop_tail(intlist_t *list) {
 
     /**CS**/
     last = list->last;
-    list->last = list->last->prev;
+    list->last = last ? list->last->prev : NULL;
     if (list->last)
         list->last->next = NULL;
-    list->size--;
+    list->size -= (list->first != NULL);
     /**CS-END**/
 
     printf("reader: releasing lock\n");
@@ -231,7 +229,7 @@ int intlist_pop_tail(intlist_t *list) {
     }
 
     pthread_cond_signal(&list->nonfull);
-    ret = last->data;
+    ret = last ? last->data:-1;
     intlist_entry_destroy(last);
     return ret;
 }
@@ -255,16 +253,25 @@ void intlist_remove_last_k(intlist_t *list, int k) {
 
     /**CS**/
     i = k;
-    printf("k: %d\n", k);
     eff_size = MIN(k, list->size);
+    printf("k: %d\n", eff_size);
     cutoff = list->last;
+    if(list->last) { //nitzanc
+        if(list->last->next)
+            printf("error: %d\n", list->last->next->data);
+        assert(list->last->next == NULL);
+    }
     for (i = 0; i < eff_size-1; i++)
         cutoff = cutoff->prev;
     list->size -= eff_size;
     list->last = cutoff ? cutoff->prev:NULL;
+    if(list->last)
+        list->last->next = NULL;
     list->first = list->size ? list->first:NULL;
     /**CS-END**/
 
+    
+    printf("gc: releasing lock...\n");
     rc = pthread_mutex_unlock(&list->lock);
     if (rc) {
         printf("%s: mutex unlock failed\n",
@@ -273,6 +280,7 @@ void intlist_remove_last_k(intlist_t *list, int k) {
     }
 
     intlist_multiple_entries_destroy(cutoff);
+    printf("finished destroying...\n");
     for (i = 0; i<eff_size; i++)
         pthread_cond_signal(&list->nonfull);
 }
@@ -291,7 +299,7 @@ void* intlist_garbage_collector(void* void_list) {
     intlist_t *list = (intlist_t *)void_list;
 
     int i; //nitzanc
-    while(1) {
+    while(!stop) {
 
         printf("gc: try to take lock...\n"); 
         rc = pthread_mutex_lock(&list->lock);
@@ -302,16 +310,19 @@ void* intlist_garbage_collector(void* void_list) {
         }
         printf("gc: taken!\n"); 
 
-        while (list->size < list->capacity) {
+        while (!stop && list->size < list->capacity) {
             printf("gc: entering wait...\n");
             rc = pthread_cond_wait(&wakeup_gc, &list->lock);
-            pthread_testcancel();
             if (rc) {
                 printf("%s: mutex conditional wait failed\n",
                        __func__);
                 pthread_exit(&rc);
             }
             printf("gc: wakeup from lock\n");
+        }
+        if (stop) {
+            pthread_mutex_unlock(&list->lock);
+            break;
         }
         printf("gc: taken!\n");
 
@@ -330,14 +341,14 @@ void* intlist_garbage_collector(void* void_list) {
         }
 
     }
-
+    printf("closing gc...\n");
     pthread_exit(&rc);
 }
 
 void* intlist_writer(void* void_list) {
     srand((unsigned int)time(NULL));
     intlist_t *list = (intlist_t*)void_list;
-    while(1) {
+    while(!stop) {
         intlist_push_head(list, rand());
     }
     pthread_exit(NULL);
@@ -345,10 +356,11 @@ void* intlist_writer(void* void_list) {
 
 void* intlist_reader(void* void_list) {
     intlist_t *list = (intlist_t*)void_list;
-    while(1) {
+    while(!stop) {
         intlist_pop_tail(list);
     }
 
+    printf("closing reader..\n");
     //shouldn't get here
     pthread_exit(NULL);
 }
@@ -427,6 +439,7 @@ int main ( int argc, char *argv[]) {
         pthread_mutex_destroy(&list.lock);
     }
 
+    stop = 0;
     /* initialize garbage collector thread, with another
      * conditional variable to wake it up (in case of 
      * a full list */
@@ -464,6 +477,8 @@ int main ( int argc, char *argv[]) {
 
     /*sleep for a given time */
     sleep(duration);
+    stop = 1;
+    pthread_cond_signal(&wakeup_gc); 
 
     /* print list size & elements, as measured in exact time,
      * before closing threads might corrupt results */
@@ -498,15 +513,15 @@ int main ( int argc, char *argv[]) {
 //    pthread_exit(&rc);
 //    }
 
+/*
     printf("sending cancel requests...\n"); 
     for (i=0; i<rnum; i++)
         rc |= pthread_cancel(readers_threads[i]);
     for (i=0; i<wnum; i++)
         rc |= pthread_cancel(writers_threads[i]);
     rc |= pthread_cancel(gc);
+*/
 
-    printf("Sleeping again...\n");
-    sleep(5);
 /*
     printf("admin: try to take lock...\n");
     rc = pthread_mutex_lock(&list.lock);
@@ -539,8 +554,6 @@ int main ( int argc, char *argv[]) {
 
 
     /***/
-    printf("admin: signaling reader...\n");
-    pthread_cond_signal(&list.nonempty); 
     printf("finishing...\n"); return 0; //nitzanc
 
 cleanup:
