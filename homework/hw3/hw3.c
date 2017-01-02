@@ -105,8 +105,13 @@ void intlist_init(intlist_t *list) {
 
 void intlist_destroy(intlist_t *list) {
     int rc;
+    printf("before freeing elements...\n");
+    printf("list->size: %d\n", list->size);
     intlist_multiple_entries_destroy(list->first);
+    printf("after freeing elements...\n");
+    printf("before freeing list...\n");
     free(list);
+    printf("after freeing list...\n");
 }
 
 intlist_entry_t* intlist_entry_create(int n) {
@@ -491,58 +496,6 @@ int main ( int argc, char *argv[]) {
     stop = 1;
     pthread_cond_signal(&wakeup_gc); 
 
-    /* print list size & elements, as measured in exact time,
-     * before closing threads might corrupt results */
-/*    printf("admin: try to take lock...\n");
-    rc = pthread_mutex_lock(&list.lock);
-    printf("admin: Taken!\n");
-    printf("list size: %d\n", list.size);
-    printf("list elements:");
-    curr = list.first;
-    for(i=0; i<list.size; i++) {
-        printf("%d%c", curr->data, (i==list.size-1) ? '\n' : ' ');
-        curr = curr->next;
-    }
-    printf("admin: releasing lock...\n");
-    rc = pthread_mutex_unlock(&list.lock);
-*/
-
-    /***/
-    //nitzanc
-//    printf("admin: try to take lock...\n");
-//    rc = pthread_mutex_lock(&list.lock);
-//    printf("admin: taken!\n");
-
-//    printf("=====Started Cleaning!=====\n");
-
-//    printf("admin: sending all cancel requests\n");
-//    int j = 0;
-//    rc = pthread_cancel(gc);
-//    for (i=0; i<wnum; i++) {
-//        pthread_cancel(writers_threads[i]);
-//    printf("creating cleaning threads...\n");
-//    pthread_exit(&rc);
-//    }
-
-/*
-    printf("sending cancel requests...\n"); 
-    for (i=0; i<rnum; i++)
-        rc |= pthread_cancel(readers_threads[i]);
-    for (i=0; i<wnum; i++)
-        rc |= pthread_cancel(writers_threads[i]);
-    rc |= pthread_cancel(gc);
-*/
-
-/*
-    printf("admin: try to take lock...\n");
-    rc = pthread_mutex_lock(&list.lock);
-    printf("admin: taken!\n");
-    intlist_remove_last_k(&list, list.size);
-    list.capacity = 100000000;
-    printf("admin: releasing lock...\n");
-    rc = pthread_mutex_unlock(&list.lock);
-*/
-
     /*started joining*/
     printf("admin: joining reader...\n");
     for(i=0; i<rnum; i++) {
@@ -557,15 +510,6 @@ int main ( int argc, char *argv[]) {
     printf("admin: joining gc...\n");
     rc = pthread_join(gc, &exit_status);
     printf("admin: gc joined! exit status: %ld\n", (long)exit_status);
-
-    printf("finishing...\n"); pthread_exit(&rc); //nitzanc
-
-    /***/
-
-
-
-    /***/
-    printf("finishing...\n"); return 0; //nitzanc
 
 cleanup:
     //try to clean mutex resources
@@ -593,6 +537,7 @@ cleanup:
         goto exit;
     }
 
+    pthread_exit(&rc);
     //destroy list itself
     intlist_destroy(&list);
 exit: 
