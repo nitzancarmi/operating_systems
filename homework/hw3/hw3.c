@@ -89,13 +89,17 @@ void usage(char* filename) {
 
 void intlist_init(intlist_t *list) {
     int rc;
+//    intlist_t *list_alloc;
 
-    list = (intlist_t *)malloc(sizeof(intlist_t));
+    *list = *((intlist_t *)malloc(sizeof(intlist_t)));
     if (!list) {
         printf("%s: Could not allocate memory for list",
                __func__);
         return;
     }
+//    *list = *list_alloc;
+    list->first = NULL;
+    list->last = NULL;
     list->size = 0;
 }
 
@@ -115,6 +119,8 @@ intlist_entry_t* intlist_entry_create(int n) {
                __func__);
         return entry;
     }
+    entry->next = NULL;
+    entry->prev = NULL;
     entry->data = n;
     return entry;
 }
@@ -135,6 +141,7 @@ void intlist_multiple_entries_destroy(intlist_entry_t *head) {
 void intlist_push_head(intlist_t *list, int value) {
     int rc;
     intlist_entry_t *entry = intlist_entry_create(value);
+    assert(entry->data);
     if(!entry) {
         printf("%s: failed to create entry\n",
                __func__);
@@ -214,7 +221,8 @@ int intlist_pop_tail(intlist_t *list) {
 
     /**CS**/
     last = list->last;
-    list->last = last ? list->last->prev : NULL;
+    if (list->last)
+        list->last = list->last->prev;
     if (list->last)
         list->last->next = NULL;
     list->size -= (list->first != NULL);
@@ -396,6 +404,9 @@ int main ( int argc, char *argv[]) {
 
     /*initialize list and set thread arrays*/
     intlist_init(&list);
+    printf("list size error: %d\n", list.size);
+    assert(list.size == 0);
+    assert(list.last == NULL);
     list.size = 0;
     list.capacity = max_size;
     pthread_t readers_threads[rnum];
