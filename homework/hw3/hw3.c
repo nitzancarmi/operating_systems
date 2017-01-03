@@ -36,7 +36,7 @@ typedef struct intlist_t {
 void usage(char* filename);
 
 /*initialize the list. You may assume the argument is not a previously initialized or destroyed list*/
-void intlist_init(intlist_t *list);
+void intlist_init(intlist_t **list);
 
 /*frees all memory used by the list, including any of its items*/
 void intlist_destroy(intlist_t *list);
@@ -86,11 +86,13 @@ void usage(char* filename) {
             "duration");
 }
 
-void intlist_init(intlist_t *list) {
+void intlist_init(intlist_t **p_list) {
     int rc;
+    intlist_t *list;
 
     /*allocate a list struct*/
-    *list = *((intlist_t *)malloc(sizeof(intlist_t)));
+    *p_list = (intlist_t *)malloc(sizeof(intlist_t));
+    list = *p_list;
     if (!list) {
         printf("%s: Could not allocate memory for list",
                __func__);
@@ -160,7 +162,9 @@ void intlist_destroy(intlist_t *list) {
         return;
     }
 
-    intlist_multiple_entries_destroy(list->first);
+    printf("size: %d\n", list->size);
+    if(list->size)
+        intlist_multiple_entries_destroy(list->first);
     free(list);
 }
 
@@ -278,6 +282,7 @@ int intlist_pop_tail(intlist_t *list) {
 
     ret = last ? last->data:-1;
     intlist_entry_destroy(last);
+    printf("destroyed. size: %d\n", list->size);
     return ret;
 }
 
@@ -316,7 +321,8 @@ void intlist_remove_last_k(intlist_t *list, int k) {
         return;
     }
 
-    intlist_multiple_entries_destroy(cutoff);
+    if(list->size)
+        intlist_multiple_entries_destroy(cutoff);
     printf("finished destroying...\n");
 }
 
@@ -356,6 +362,15 @@ void* intlist_garbage_collector(void* void_list) {
             printf("gc: wakeup from lock\n");
         }
         printf("gc: taken!\n");
+        if(stop) {
+            rc = pthread_mutex_unlock(&list->lock);
+            if (rc) {
+                    printf("%s: mutex unlock failed\n",
+                           __func__);
+                    pthread_exit(&rc);
+            }
+            break;
+        }
 
         /***CS***/
         printf("################# GARBAGE COLLECTOR###################\n");
@@ -406,7 +421,7 @@ int main ( int argc, char *argv[]) {
         return -1;
     }
 
-    intlist_t list;
+    intlist_t *list;
     intlist_entry_t *curr;
     int rc, i, _rc, fsize;
     int wnum, rnum;
@@ -425,7 +440,7 @@ int main ( int argc, char *argv[]) {
 
     /*initialize list and set thread variables*/
     intlist_init(&list);
-    pthread_mutex_t *lock = intlist_get_mutex(&list);
+    pthread_mutex_t *lock = intlist_get_mutex(list);
     pthread_t readers_threads[rnum];
     pthread_t writers_threads[wnum];
     pthread_t gc;
@@ -437,10 +452,10 @@ int main ( int argc, char *argv[]) {
     if (rc) {
         printf("%s: GC condition init failed\n",
                __func__);
-        intlist_destroy(&list);
+        intlist_destroy(list);
         goto exit;
     }
-    rc = pthread_create(&gc, NULL, intlist_garbage_collector,(void*)&list);
+    rc = pthread_create(&gc, NULL, intlist_garbage_collector,(void*)list);
     if (rc) {
         printf("%s: GC thread creation failed\n",
                __func__);
@@ -449,7 +464,7 @@ int main ( int argc, char *argv[]) {
 
     /*generate readers and writers threads*/
     for (i=0; i < rnum; i++) {
-        rc = pthread_create(&readers_threads[i], NULL, intlist_reader, (void*)&list);
+        rc = pthread_create(&readers_threads[i], NULL, intlist_reader, (void*)list);
         if (rc) {
             printf("%s: reader %d thread creation failed\n",
                    __func__, i);
@@ -457,7 +472,7 @@ int main ( int argc, char *argv[]) {
         }
     }
     for (i=0; i < wnum; i++) {
-        rc = pthread_create(&writers_threads[i], NULL, intlist_writer, (void*)&list);
+        rc = pthread_create(&writers_threads[i], NULL, intlist_writer, (void*)list);
         if (rc) {
             printf("%s: writer %d thread creation failed\n",
                    __func__, i);
@@ -478,13 +493,13 @@ int main ( int argc, char *argv[]) {
     }
 
     /***CS***/
-    fsize = intlist_size(&list);
+    fsize = intlist_size(list);
     printf("finished running for %lu seconds\n", duration);
     printf("list size: %d\n", fsize);
     printf("list elements:\n");
     for(i=0; i<fsize; i++)
         printf("%d%c",
-               intlist_pop_tail(&list),
+               intlist_pop_tail(list),
                (i+1 == fsize) ? '\n':' ');
     /***CS-END***/
 
@@ -498,7 +513,7 @@ int main ( int argc, char *argv[]) {
     /* make sure all threads won't "wait" and never close */
     pthread_cond_signal(&wakeup_gc);
     for(i=0; i<rnum; i++)
-        intlist_push_head(&list, 0);
+        intlist_push_head(list, 0);
 
     /*started joining*/
     printf("admin: joining writer...\n");
@@ -523,9 +538,8 @@ cleanup:
         rc = rc ? rc : _rc;
         goto exit;
     }
-    printf("Destroying...\n");
-    sleep(3);
-    intlist_destroy(&list);
+    printf("Destroying %d...\n", list->size);
+    intlist_destroy(list);
 exit: 
     pthread_exit(&rc);
 }
