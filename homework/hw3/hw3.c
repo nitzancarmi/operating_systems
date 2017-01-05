@@ -12,6 +12,14 @@
 
 #define MIN(x, y)       (((x) < (y)) ? (x) : (y))
 #define PR_ERR(msg)     printf("ERROR[%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
+<<<<<<< HEAD
+=======
+
+static pthread_cond_t wakeup_gc;
+
+static int stop;
+static int max_size;
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
 
 /* linked list struct definitions */
 typedef struct intlist_entry_t {
@@ -91,6 +99,19 @@ void usage(char* filename) {
 
 void intlist_init(intlist_t *list) {
     int rc;
+<<<<<<< HEAD
+=======
+    intlist_t *list;
+
+    /*allocate a list struct*/
+    *p_list = (intlist_t *)malloc(sizeof(intlist_t));
+    list = *p_list;
+    if (!list) {
+        PR_ERR("Could not allocate memory for list");
+        return;
+    }
+    memset(list, 0, sizeof(intlist_t));
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
 
     /*set mutex attributes (recursive)*/
 	rc = pthread_mutexattr_init(&list->lock_attr);
@@ -190,7 +211,11 @@ void intlist_push_head(intlist_t *list, int value) {
     rc = pthread_mutex_lock(&list->lock);
     if (rc) {
         PR_ERR("mutex lock failed");
+<<<<<<< HEAD
         _intlist_entry_destroy(entry);
+=======
+        intlist_entry_destroy(entry);
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
         return;
     }
  
@@ -248,7 +273,11 @@ int intlist_pop_tail(intlist_t *list) {
     }
 
     ret = last ? last->data:-1;
+<<<<<<< HEAD
     _intlist_entry_destroy(last);
+=======
+    intlist_entry_destroy(last);
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
     return ret;
 }
 
@@ -283,7 +312,11 @@ void intlist_remove_last_k(intlist_t *list, int k) {
     }
 
     if(list->size)
+<<<<<<< HEAD
         _intlist_multiple_entries_destroy(cutoff);
+=======
+        intlist_multiple_entries_destroy(cutoff);
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
 }
 
 int intlist_size(intlist_t *list) {
@@ -398,7 +431,11 @@ int main ( int argc, char *argv[]) {
     rc = pthread_cond_init(&wakeup_gc, NULL);
     if (rc) {
         PR_ERR("GC condition init failed\n");
+<<<<<<< HEAD
         intlist_destroy(&glist);
+=======
+        intlist_destroy(list);
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
         goto exit;
     }
     rc = pthread_create(&gc, NULL, garbage_collector_thread,(void*)&glist);
@@ -458,7 +495,11 @@ int main ( int argc, char *argv[]) {
     for(i=0; i<rnum; i++)
         intlist_push_head(&glist, 0);
 
+<<<<<<< HEAD
     /*start joining*/
+=======
+    /*started joining*/
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
     for(i=0; i<wnum; i++) {
         rc = pthread_join(writers_threads[i], &exit_status);
         if (rc) {
@@ -486,7 +527,11 @@ cleanup:
         rc = rc ? rc : _rc;
         goto exit;
     }
+<<<<<<< HEAD
     intlist_destroy(&glist);
+=======
+    intlist_destroy(list);
+>>>>>>> dc5db231679e0ed8bb0c87629a224e71d592c280
 exit: 
     pthread_exit(&rc);
 }
