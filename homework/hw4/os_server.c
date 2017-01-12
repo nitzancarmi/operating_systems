@@ -5,16 +5,19 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <time.h> 
 #include <assert.h>
 
 #define PR_ERR(msg)     printf("ERROR[%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
 
 #define MIN(x, y)       (((x) < (y)) ? (x) : (y))
-#define RAND_DEV "/dev/urandom"
+#define RAND_DEV        "/dev/urandom"
 
 struct file_ctx {
     size_t  size;  
@@ -26,7 +29,7 @@ int    key_fd;
 
 
 void usage(char* filename);
-char* generate_key(size_t size);
+void generate_key(char* buf, size_t size);
 int read_encrypt_write(int src, int tgt, size_t size, bool encrypt);
 int create_random_keyfile(int fd, size_t size);
 int create_keyfile(char *key_path, size_t key_len);
@@ -34,7 +37,7 @@ static void handle_sigint (int sig);
 int handle_client_req(char *key_path);
 
 void usage(char* filename) {
-    printf("Usage: %s [%s] [%s] [%s] (%s)\n"
+    printf("Usage: %s [%s] [%s] (%s)\n"
            "Aborting...\n",
             filename,
             "port",
@@ -42,34 +45,35 @@ void usage(char* filename) {
             "key_length");
 }
 
-char* generate_key(size_t size) {
-    int i, b_read = 0;
+void generate_key(char* buf, size_t size) {
+    unsigned int i;
+    int b_read = 0;
     char ch_buf;
-    char key_buf[size];
+    memset(buf, '0', size);
 
-    for(i=0; i < size;) {
+    for(i=0; i < size; i++) {
         b_read = read(key_fd, &ch_buf, sizeof(char));
-        if (b_read < 0) { 
+        if (b_read < 0) {
             PR_ERR("failed to read from key file");
-            return NULL;
+            break;
         }
         else {
             if (b_read == 0) {    //reach EOF
-                if (lseek(key_fd, 0, SEEK_SET) < 0) {
+                i--;
+                if (lseek(key_fd, 0, SEEK_SET) < 0)
                     PR_ERR("failed to reset offset");
-                    return NULL;
-                }
-            } else                //read is ok
-                key_buf[i++] = ch_buf;
+            }
+            else {                //read is ok
+                buf[i] = ch_buf;
+            }
         }
     }
-    return key_buf;
 }
 
 int read_encrypt_write(int src, int tgt, size_t size, bool encrypt) {
     int b_read, b_write;
-    int buf[1024];
-    int key_buf[1024];
+    char buf[1024];
+    char key_buf[1024];
     int i;
 
     while (size > 0) {
@@ -78,18 +82,16 @@ int read_encrypt_write(int src, int tgt, size_t size, bool encrypt) {
             PR_ERR("failed to read from file");
             return -1;
         }
-        size -= b_read;
+        size -= (size_t)b_read;
 
         if (encrypt) {
-            key_buf = generate_key(b_read);
-            if(!key_buf)
-                return -1;
+            generate_key(key_buf, (size_t)b_read);
             for (i=0; i<b_read; i++)
                 buf[i] ^= key_buf[i];
         }
 
         while(b_read > 0) {
-            b_write = write(tgt, buf, b_read);
+            b_write = write(tgt, buf,(size_t)b_read);
             if (b_write < 0) {
                 PR_ERR("failed to write to file");
                 return -1;
@@ -101,7 +103,7 @@ int read_encrypt_write(int src, int tgt, size_t size, bool encrypt) {
     return 0;
 }
 
-int create_random_keyfile(int fd, ssize_t size) {
+int create_random_keyfile(int fd, size_t size) {
     if(!size)
         return -1;
 
@@ -118,7 +120,7 @@ int create_random_keyfile(int fd, ssize_t size) {
         return -1;
     }
 
-    rc = close(RAND_DEV);
+    rc = close(rnd);
     if (rc) {
         PR_ERR("failed to close random device");
         return -1;
@@ -128,10 +130,9 @@ int create_random_keyfile(int fd, ssize_t size) {
 }
 
 int create_keyfile(char *key_path, size_t key_len) {
-    key_fd = 0;
-    rc = 0;
+    int rc = 0;
 
-    key_fd = creat(key_path, S_IRWXU|S_IRWXG|S_IRWXO);
+    key_fd = creat(key_path, S_IWUSR|S_IWGRP|S_IWOTH);
     if (key_fd < 0) {
         PR_ERR("Failed to open key file");
         return -1;
@@ -149,11 +150,13 @@ int create_keyfile(char *key_path, size_t key_len) {
         return rc;
     }
 
+    rc = chmod(key_path, S_IRUSR|S_IRGRP|S_IROTH);
     rc = close(key_fd);
     if (rc) {
         PR_ERR("Failed to close key file");
         return rc;
     }
+    key_fd = 0; //for later use
 
     return rc;
 }
@@ -177,18 +180,19 @@ static void handle_sigint (int sig) {
         }
     }
 
+    printf("\n");
     exit(rc);
 }
 
 int handle_client_req(char *key_path) {
-    struct file_ctx ctx;
+    struct file_ctx *ctx;
     int b_left, b_read;
     int i, rc, _rc;
-    char buf[sizeof(struct file_ctx ctx)];
+    char buf[sizeof(struct file_ctx)];
     char *buf_p;
 
     //open key file
-    key_fd = open(key_path, O_RDWR, S_IRWXU|S_IRWXG|S_IRWXO);
+    key_fd = open(key_path, O_RDONLY, S_IRWXU|S_IRWXG|S_IRWXO);
     if (key_fd < 0) {
         PR_ERR("Failed to open key file");
         goto hdl_cleanup;
@@ -207,10 +211,10 @@ int handle_client_req(char *key_path) {
         buf_p += b_read;
         b_left -= b_read;
     }
-    ctx = (struct file_ctx)buf;
+    ctx = (struct file_ctx *)buf;
 
     //read file from client
-    rc = read_encrypt_write(sock_fd, sock_fd, ctx.size, true);
+    rc = read_encrypt_write(sock_fd, sock_fd, ctx->size, true);
     if (rc) {
         PR_ERR("failed to read/write file via TCP");
         goto hdl_cleanup;
@@ -219,10 +223,10 @@ int handle_client_req(char *key_path) {
 hdl_cleanup:
     if(key_fd)
         _rc  = close(key_fd);
-    if(sock_id)
+    if(sock_fd)
         _rc |= close(sock_fd);
     if (rc) {
-        PR_ERR("Failed to close key files");
+        PR_ERR("Failed to close key/socket file descriptors");
         rc = rc ? rc:_rc;
     }
     return rc;
@@ -244,10 +248,11 @@ int main(int argc, char *argv[])
     char recv_buf[1024];
     unsigned short port;
     char *key_path;
-    int key_fd;
     size_t key_len = 0;
     int rc = 0, _rc = 0;
     int frk;
+    key_fd = 0;
+    sock_fd = 0;
 
     //parse cmd line variables
     port = (unsigned short)strtol(argv[1], NULL, 10);
@@ -278,7 +283,7 @@ int main(int argc, char *argv[])
     }
 
     //set server attributes
-    memset(&serv_attr, '0', sizeof(serv_addr));
+    memset(&serv_attr, '0', sizeof(serv_attr));
     serv_attr.sin_family = AF_INET;
     serv_attr.sin_port = htons(port); 
     serv_attr.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY = any local machine address
@@ -289,7 +294,7 @@ int main(int argc, char *argv[])
         goto cleanup;
     }
 
-    rc = listen(sock_fd, 10) {
+    rc = listen(sock_fd, 10);
     if (rc) {
         PR_ERR("failed to start listening in socket");
         goto cleanup;
@@ -319,7 +324,7 @@ int main(int argc, char *argv[])
             PR_ERR("failed to fork a process");
             goto cleanup;
         }
-        if (!f) { //i.e child process
+        if (frk == 0) { //i.e child process
             sock_fd = conn_fd;
             return handle_client_req(key_path);
             PR_ERR("child process failed");
@@ -330,7 +335,7 @@ int main(int argc, char *argv[])
 cleanup:
     if(key_fd)
         _rc  = close(key_fd);
-    if(sock_id)
+    if(sock_fd)
         _rc |= close(sock_fd);
     if (rc) {
         PR_ERR("Failed to close key files");

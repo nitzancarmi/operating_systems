@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
     char* ip, *fin_pth, *fout_pth;
     unsigned short port;
     int sock_fd, fin_fd, fout_fd;
-    int br_local, bw_local, br_remote, bw_remote;
+    int b_to_recv, br_local, bw_local, br_remote, bw_remote;
     int b_written, b_left;
     char recv_buf[1024];
     char send_buf[1024];
@@ -80,7 +80,7 @@ int main(int argc, char *argv[])
     }
 
     //open uotput file and truncate it to input file's size
-    fout_fd = creat(fout_pth, S_IWUSR | S_IWGRP | S_IWOTH);
+    fout_fd = creat(fout_pth, S_IRWXU | S_IRWXG | S_IRWXO);
     if (fin_fd < 0) {
         PR_ERR("Failed to open input file");
         rc = -1;
@@ -128,11 +128,13 @@ int main(int argc, char *argv[])
         b_left -= b_written;
     }
     
-    //read from file and send to server
     br_local = 0;
     bw_remote = 0;
+    b_to_recv = 0;
     memset(send_buf, '0',sizeof(send_buf));
     while (1) {
+
+        //read from file and send to server
         br_local = read(fin_fd, send_buf, sizeof(send_buf));
         if(!br_local) //reach EOF
             break;
@@ -142,6 +144,7 @@ int main(int argc, char *argv[])
             goto cleanup;
         }
 
+        b_to_recv = br_local;
         while(br_local > 0) {
             bw_remote = write(sock_fd, send_buf, (size_t)br_local);
             if(bw_remote < 0) {
@@ -151,30 +154,28 @@ int main(int argc, char *argv[])
             }
             br_local -= bw_remote;
         }
-    }
 
-    //read back from server and write to output file
-    br_remote = 0;
-    bw_local = 0;
-    memset(recv_buf, '0',sizeof(recv_buf));
-    while (1) {
-        br_remote = read(sock_fd, recv_buf, sizeof(recv_buf));
-        if(!br_local) //reach EOF
-            break;
-        if (br_local < 0) {
-            PR_ERR("failed to read from socket");
-            rc = -1;
-            goto cleanup;
-        }
-
-        while(br_remote > 0) {
-            bw_local = write(fout_fd, recv_buf, (size_t)br_remote);
-            if(bw_local < 0) {
-                PR_ERR("failed to write to output file");
+        //read from server and write back to file
+        while(b_to_recv > 0) {
+            br_remote = read(sock_fd, recv_buf, (size_t)b_to_recv);
+            if(!br_remote) //reach EOF
+                break;
+            if (br_remote < 0) {
+                PR_ERR("failed to read from socket");
                 rc = -1;
                 goto cleanup;
             }
-            br_remote -= bw_local;
+            b_to_recv -= br_remote;
+
+            while(br_remote > 0) {
+                bw_local = write(fout_fd, recv_buf, (size_t)br_remote);
+                if(bw_local < 0) {
+                    PR_ERR("failed to write to output file");
+                    rc = -1;
+                    goto cleanup;
+                }
+                br_remote -= bw_local;
+            }
         }
     }
 
