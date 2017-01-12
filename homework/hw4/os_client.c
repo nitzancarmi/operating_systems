@@ -1,4 +1,3 @@
-
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -14,11 +13,15 @@
 
 #define PR_ERR(msg)     printf("ERROR[%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
 
+#define BUF_SIZE        4096
+
 struct file_ctx {
   size_t size;  
 };
 
 void usage(char* filename);
+int handoff_file_ctx(struct file_ctx *ctx, int socket);
+int transfer_buffer(int fin, int fout, size_t size);
 
 void usage(char* filename) {
     printf("Usage: %s [%s] [%s] [%s] [%s]\n"
@@ -30,6 +33,50 @@ void usage(char* filename) {
             "out_file");
 }
 
+int handoff_file_ctx(struct file_ctx *ctx, int socket) {
+    int b_left, b_written;
+ 
+    b_left = sizeof(struct file_ctx);
+    b_written = 0;
+    while (b_left > 0) {
+        b_written = write(socket, ctx, sizeof(struct file_ctx));
+        if(b_written < 0) {
+            PR_ERR("failed to write context to socket");
+            return -1;
+        }
+        b_left -= b_written;
+    }
+    return 0;
+}
+
+int transfer_buffer(int fin, int fout, size_t size) {
+    int b_read, b_write;
+    char buf[size];
+    int res = 0;
+
+    //read from input file into buffer
+    b_read = read(fin, buf, sizeof(buf));
+    if(!b_read) //reach EOF
+        return 0;
+    if (b_read < 0) {
+        PR_ERR("failed to read from local file");
+        return -1;
+    }
+    res = b_read;
+
+    //write buffer to output file
+    while(b_read > 0) {
+        b_write = write(fout, buf, (size_t)b_read);
+        if(b_write < 0) {
+            PR_ERR("failed to write to socket");
+            return -1;
+        }
+        b_read -= b_write;
+    }
+
+    return res;
+}
+
 int main(int argc, char *argv[])
 {
 
@@ -39,18 +86,13 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-/***/
-
     int rc = 0, _rc = 0;
-    char* ip, *fin_pth, *fout_pth;
+    char *ip, *fin_pth, *fout_pth;
     unsigned short port;
     int sock_fd, fin_fd, fout_fd;
-    int b_to_recv, br_local, bw_local, br_remote, bw_remote;
-    int b_written, b_left;
-    char recv_buf[1024];
-    char send_buf[1024];
+    int b_send, b_recv;
     struct stat fin_st;
-    struct sockaddr_in serv_attr; 
+    struct sockaddr_in serv_attr;
     struct file_ctx ctx;
 
     //parse cmd line variables
@@ -63,8 +105,6 @@ int main(int argc, char *argv[])
         usage(argv[0]);
         return rc;
     }
-
-/***/
 
     //open input file
     fin_fd = open(fin_pth, O_RDONLY);
@@ -79,20 +119,18 @@ int main(int argc, char *argv[])
         goto cleanup;    
     }
 
-    //open uotput file and truncate it to input file's size
+    //open output file and truncate it to input file's size
     fout_fd = creat(fout_pth, S_IRWXU | S_IRWXG | S_IRWXO);
     if (fin_fd < 0) {
-        PR_ERR("Failed to open input file");
+        PR_ERR("Failed to open output file");
         rc = -1;
         goto cleanup;
     }
-    rc = truncate(fout_pth,(off_t)(fin_st.st_size));
+    rc = truncate(fout_pth, (off_t)(fin_st.st_size));
     if (rc) {
-        PR_ERR("Failed to truncate file");
+        PR_ERR("Failed to truncate output file");
         goto cleanup;
     }
-
-/***/
 
     //initialize a new socket
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -107,7 +145,8 @@ int main(int argc, char *argv[])
     serv_attr.sin_family = AF_INET;
     serv_attr.sin_port = htons(port);
     serv_attr.sin_addr.s_addr = inet_addr(ip);
-    rc = connect(sock_fd,(struct sockaddr *)&serv_attr, sizeof(serv_attr));
+    rc = connect(sock_fd, (struct sockaddr *)&serv_attr,
+                                sizeof(serv_attr));
     if (rc) {
        PR_ERR("socket connect Failed");
        goto cleanup;
@@ -116,66 +155,33 @@ int main(int argc, char *argv[])
     //handoff file context to server
     memset(&ctx, '0', sizeof(struct file_ctx));
     ctx.size = (size_t)fin_st.st_size;
-    b_left = sizeof(struct file_ctx);
-    b_written = 0;
-    while (b_left > 0) {
-        b_written = write(sock_fd, &ctx, sizeof(struct file_ctx));
-        if(b_written < 0) {
-            PR_ERR("failed to write context to socket");
-            rc = -1;
-            goto cleanup;
-        }
-        b_left -= b_written;
+    rc = handoff_file_ctx(&ctx, sock_fd);
+    if (rc) {
+       PR_ERR("failed to send file context to server");
+       goto cleanup;
     }
-    
-    br_local = 0;
-    bw_remote = 0;
-    b_to_recv = 0;
-    memset(send_buf, '0',sizeof(send_buf));
+
+    /* main communication with server */
+    b_send = 0;
+    b_recv = 0;
     while (1) {
 
-        //read from file and send to server
-        br_local = read(fin_fd, send_buf, sizeof(send_buf));
-        if(!br_local) //reach EOF
+        //read from input and send over socket
+        b_send = transfer_buffer(fin_fd, sock_fd, BUF_SIZE);
+        if(!b_send) //reach EOF
             break;
-        if (br_local < 0) {
-            PR_ERR("failed to read from local file");
+        if (b_send < 0) {
+            PR_ERR("failed to send buffer to server");
             rc = -1;
             goto cleanup;
         }
 
-        b_to_recv = br_local;
-        while(br_local > 0) {
-            bw_remote = write(sock_fd, send_buf, (size_t)br_local);
-            if(bw_remote < 0) {
-                PR_ERR("failed to write to socket");
-                rc = -1;
-                goto cleanup;
-            }
-            br_local -= bw_remote;
-        }
-
-        //read from server and write back to file
-        while(b_to_recv > 0) {
-            br_remote = read(sock_fd, recv_buf, (size_t)b_to_recv);
-            if(!br_remote) //reach EOF
-                break;
-            if (br_remote < 0) {
-                PR_ERR("failed to read from socket");
-                rc = -1;
-                goto cleanup;
-            }
-            b_to_recv -= br_remote;
-
-            while(br_remote > 0) {
-                bw_local = write(fout_fd, recv_buf, (size_t)br_remote);
-                if(bw_local < 0) {
-                    PR_ERR("failed to write to output file");
-                    rc = -1;
-                    goto cleanup;
-                }
-                br_remote -= bw_local;
-            }
+        //read from socket and write back to output file
+        b_recv = transfer_buffer(sock_fd, fout_fd,(size_t)b_send);
+        if (b_recv < 0) {
+            PR_ERR("failed to receive buffer from server");
+            rc = -1;
+            goto cleanup;
         }
     }
 

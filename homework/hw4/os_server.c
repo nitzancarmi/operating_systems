@@ -18,6 +18,7 @@
 
 #define MIN(x, y)       (((x) < (y)) ? (x) : (y))
 #define RAND_DEV        "/dev/urandom"
+#define BUF_SIZE        4096
 
 struct file_ctx {
     size_t  size;  
@@ -72,12 +73,12 @@ void generate_key(char* buf, size_t size) {
 
 int read_encrypt_write(int src, int tgt, size_t size, bool encrypt) {
     int b_read, b_write;
-    char buf[1024];
-    char key_buf[1024];
+    char buf[BUF_SIZE];
+    char key_buf[BUF_SIZE];
     int i;
 
     while (size > 0) {
-        b_read = read(src, buf, MIN(size, 1024));
+        b_read = read(src, buf, MIN(size, BUF_SIZE));
         if(b_read < 0) {
             PR_ERR("failed to read from file");
             return -1;
@@ -151,6 +152,11 @@ int create_keyfile(char *key_path, size_t key_len) {
     }
 
     rc = chmod(key_path, S_IRUSR|S_IRGRP|S_IROTH);
+    if (rc) {
+        PR_ERR("Failed to change file permissions");
+        return rc;
+    }
+
     rc = close(key_fd);
     if (rc) {
         PR_ERR("Failed to close key file");
@@ -244,8 +250,8 @@ int main(int argc, char *argv[])
     int conn_fd = 0;
     struct sockaddr_in serv_attr;  
     struct sigaction sa;
-    char send_buf[1024];
-    char recv_buf[1024];
+    char send_buf[BUF_SIZE];
+    char recv_buf[BUF_SIZE];
     unsigned short port;
     char *key_path;
     size_t key_len = 0;
@@ -286,8 +292,7 @@ int main(int argc, char *argv[])
     memset(&serv_attr, '0', sizeof(serv_attr));
     serv_attr.sin_family = AF_INET;
     serv_attr.sin_port = htons(port); 
-    serv_attr.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY = any local machine address
-
+    serv_attr.sin_addr.s_addr = htonl(INADDR_ANY);
     rc = bind(sock_fd,(struct sockaddr*)&serv_attr, sizeof(serv_attr));
     if (rc) {
         PR_ERR("failed to bind socket");
@@ -327,8 +332,6 @@ int main(int argc, char *argv[])
         if (frk == 0) { //i.e child process
             sock_fd = conn_fd;
             return handle_client_req(key_path);
-            PR_ERR("child process failed");
-            goto cleanup;
         }
     }
 
