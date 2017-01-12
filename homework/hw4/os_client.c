@@ -11,7 +11,9 @@
 #include <errno.h>
 #include <arpa/inet.h> 
 
-#define PR_ERR(msg)     printf("ERROR[%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
+#define PR_ERR(msg)     printf("ERROR [%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
+
+#define BUF_SIZE        4096
 
 #define BUF_SIZE        4096
 

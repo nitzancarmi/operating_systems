@@ -14,7 +14,7 @@
 #include <time.h> 
 #include <assert.h>
 
-#define PR_ERR(msg)     printf("ERROR[%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
+#define PR_ERR(msg)     printf("ERROR [%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
 
 #define MIN(x, y)       (((x) < (y)) ? (x) : (y))
 #define RAND_DEV        "/dev/urandom"
@@ -259,6 +259,7 @@ int main(int argc, char *argv[])
     int frk;
     key_fd = 0;
     sock_fd = 0;
+    struct stat key_st;
 
     //parse cmd line variables
     port = (unsigned short)strtol(argv[1], NULL, 10);
@@ -279,7 +280,13 @@ int main(int argc, char *argv[])
             return rc;
         }
     }
-
+    else { //only check file validity
+        if(stat(key_path, &key_st) || !key_st.st_size) {
+            PR_ERR("bad key file stats");
+            return -1;
+        }
+    }
+    
     //initialize a new socket
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
