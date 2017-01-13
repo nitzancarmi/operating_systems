@@ -10,9 +10,8 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
-#include <time.h> 
-#include <assert.h>
 
 #define PR_ERR(msg)     printf("ERROR [%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
 
@@ -168,7 +167,14 @@ int create_keyfile(char *key_path, size_t key_len) {
 }
 
 static void handle_sigint (int sig) {
-    int rc;
+    int rc = 0;
+
+    //wait for all child processes to finish
+    while (wait(&rc) != -1);
+    if (rc) {
+        PR_ERR("Failed to wait all child processes to finish");
+        exit(rc);
+    }
 
     if(sock_fd) {
         rc = close(sock_fd);
@@ -318,7 +324,7 @@ int main(int argc, char *argv[])
     sa.sa_handler = handle_sigint;
     rc = sigaction(SIGINT, &sa, NULL);
     if (rc) {
-        PR_ERR("failed to register SiGINT handler");
+        PR_ERR("failed to register SIGINT handler");
         goto cleanup;
     }
 
@@ -343,6 +349,12 @@ int main(int argc, char *argv[])
     }
 
 cleanup:
+    //wait for all child processes to finish
+    while (wait(&_rc) != -1);
+    if (_rc) {
+        PR_ERR("Failed to wait all child processes to finish");
+        rc = rc ? rc:_rc;
+    }
     if(key_fd)
         _rc  = close(key_fd);
     if(sock_fd)
