@@ -30,28 +30,23 @@ int is_expected_file(int fd) {
     return (gpid == current->pid &&
             gfd == fd);
 }
-asmlinkage long encrypted_write(unsigned int fd, const char __user *buf, size_t count) {
+asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count) {
 	int i;
-	char buf_enc[256] = {0};
-    int eff_size = MIN(256, count);
+    char c;
+    int rc;
 
+    //encrypt buffer for writing
     if(is_expected_file(fd) && cipher) {
-        for(i=0; i<eff_size; i++) {
-            get_user(buf_enc[i], buf + i);
-            buf_enc[i] += 1;
+        for(i=0; i<count; i++) {
+            get_user(c, buf + i);
+            c++;
+            put_user(c, buf + i);
         }
-        count -= eff_size;
-        printk("special write. buffer %s\n", buf_enc);
-        return ref_write(fd, &buf_enc[0], eff_size);
-    } else {
-        return ref_write(fd, buf, count);
     }
-}
 
-asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count) {
-	int i;
-	char c;
+    rc = ref_write(fd, buf, count);
 
+    //decrypt back buffer so user won't notice any difference
     if(is_expected_file(fd) && cipher) {
         for(i=0; i<count; i++) {
             get_user(c, buf + i);
@@ -59,7 +54,26 @@ asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count)
             put_user(c, buf + i);
         }
     }
-    return ref_read(fd, buf, count);
+
+    return rc;
+}
+
+asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count) {
+	int i, b_read;
+	char c;
+
+    b_read = ref_read(fd, buf, count);
+
+    //decrypt buffer for expected file
+    if(is_expected_file(fd) && cipher) {
+        for(i=0; i<b_read; i++) {
+            get_user(c, buf + i);
+            c--;
+            put_user(c, buf + i);
+        }
+    }
+
+    return b_read;
 }
 
 static unsigned long **acquire_sys_call_table(void)
