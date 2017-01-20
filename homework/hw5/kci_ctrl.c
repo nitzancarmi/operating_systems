@@ -141,13 +141,13 @@ void kmod_exec_ioctl_cmd(enum ioctl_command cmd, void* args) {
 void kmod_remove() {
     int rc = 0;
 
-/*
+
     rc = cp(LOG_PATH, "./calls");
     if(rc) {
         PR_ERR("failed to copy log file into folder");
         exit(rc);
     }
-*/
+
     rc = delete_module(MODULE_NAME, 0);
     if(rc) {
         PR_ERR("failed to remove module");
