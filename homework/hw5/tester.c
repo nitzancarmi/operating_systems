@@ -39,10 +39,14 @@ int main (int argc, char *argv[]) {
             printf("write: %s\n", argv[1]);
             printf("%s\n",strerror(errno));
             break;
+        case 'c':
+            memset(buf, 0, sizeof(buf));
+            break;
         case 'x':
             close(fd);
+            close(fd_in);
             unlink(TESTER_PATH);
-            exit(0);
+            return 0;
         default:
             continue;
         }

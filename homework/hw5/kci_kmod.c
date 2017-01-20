@@ -42,6 +42,7 @@ asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count)
             c++;
             put_user(c, buf + i);
         }
+        printk("special write. actual writing <%s>\n", buf);
     }
 
     rc = ref_write(fd, buf, count);
@@ -66,6 +67,7 @@ asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count)
 
     //decrypt buffer for expected file
     if(is_expected_file(fd) && cipher) {
+        printk("special read. actual read <%s>\n", buf);
         for(i=0; i<b_read; i++) {
             get_user(c, buf + i);
             c--;
