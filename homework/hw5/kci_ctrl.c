@@ -11,25 +11,9 @@
 #include <unistd.h>
 #include <errno.h>
 
-#define DEV_PATH    "/dev/kci_dev"
-#define LOG_PATH    "/sys/kernel/debug/kcikmod/calls"
-#define MODULE      "kci_kmod"
-#define MAJOR       245
-#define MINOR       0
+#include "kci.h" /*our header file*/ 
 
-/*define ioctl commands*/
-#define IOCTL_SET_PID   _IOW(MAJOR, 0, int)
-#define IOCTL_SET_FD    _IOW(MAJOR, 1, int)
-#define IOCTL_CIPHER    _IOW(MAJOR, 2, int)
-
-#define PR_ERR(msg)     printf("ERROR [%s] %s : [%d] %s\n", __func__, msg, errno, strerror(errno)) 
-
-enum ioctl_command {
-    KMOD_SET_PID,
-    KMOD_SET_FD,
-    KMOD_START,
-    KMOD_STOP,
-};
+#define PR_ERR(msg)     printf("ERROR [%s, %d] %s : [%d] %s\n", __func__, __LINE__, msg, errno, strerror(errno)) 
 
 
 /*call wrappers for syscalls */
@@ -91,7 +75,7 @@ void kmod_init(char *mod) {
     }
 
     //create character device
-    dev = makedev(MAJOR, MINOR);
+    dev = makedev(MAJOR_NUM, MINOR_NUM);
     if (!dev) {
         PR_ERR("failed to create device in makedev");
         exit(-1);
@@ -157,13 +141,14 @@ void kmod_exec_ioctl_cmd(enum ioctl_command cmd, void* args) {
 void kmod_remove() {
     int rc = 0;
 
+/*
     rc = cp(LOG_PATH, "./calls");
     if(rc) {
         PR_ERR("failed to copy log file into folder");
         exit(rc);
     }
-
-    rc = delete_module(MODULE, 0);
+*/
+    rc = delete_module(MODULE_NAME, 0);
     if(rc) {
         PR_ERR("failed to remove module");
         exit(rc);
