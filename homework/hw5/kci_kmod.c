@@ -32,54 +32,34 @@ int is_expected_file(int fd) {
 }
 asmlinkage long encrypted_write(unsigned int fd, const char __user *buf, size_t count) {
 	int i;
-    int offset;
-	int b_write = 0;
-	char buf_enc[256];
+	char buf_enc[256] = {0};
+    int eff_size = MIN(256, count);
 
     if(is_expected_file(fd) && cipher) {
-        while(count > 0) {
-            for(i=0; i<MIN(256, count); i++) {
-                get_user(buf_enc[i], buf + offset);
-                buf_enc[i] += 1;
-                offset++;
-            }
-            count -= 256;
-            b_write = ref_write(fd, buf_enc, 256);
-            if (b_write < 0) {
-                pr_err("failed to write encrypted buffer to file");
-                return -1;
-            }
+        for(i=0; i<eff_size; i++) {
+            get_user(buf_enc[i], buf + i);
+            buf_enc[i] += 1;
         }
-    }
-    else
+        count -= eff_size;
+        printk("special write. buffer %s\n", buf_enc);
+        return ref_write(fd, &buf_enc[0], eff_size);
+    } else {
         return ref_write(fd, buf, count);
-        
-    printk("Writing to fd %d\n", fd);
-    return 0;
+    }
 }
 
 asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count) {
 	int i;
-	int b_read = 0;
-    int eff_size = MIN(512, count);
-	char buf_dec[512];
+	char c;
 
     if(is_expected_file(fd) && cipher) {
-        b_read = ref_read(fd, buf_dec, eff_size);
-        if (b_read < 0) {
-            pr_err("failed to read encrypted buffer from file");
-            return b_read;
-        }
-        for(i=0; i<b_read; i++) {
-            buf_dec[i]--;
-            put_user(buf_dec[i], buf + i);
+        for(i=0; i<count; i++) {
+            get_user(c, buf + i);
+            c--;
+            put_user(c, buf + i);
         }
     }
-    else
-        return ref_read(fd, buf, count);
-        
-    printk("reading from fd %d\n", fd);
-    return 0;
+    return ref_read(fd, buf, count);
 }
 
 static unsigned long **acquire_sys_call_table(void)
