@@ -48,6 +48,7 @@ asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count)
             c++;
             put_user(c, buf + i);
         }
+        printk("special write. actual write <%s>\n", buf);
     }
 
     rc = ref_write(fd, buf, count);
@@ -148,11 +149,12 @@ static int __init kci_kmod_init(void)
 	if (!logdir)
 		return -ENOENT;
 
-	logfile = debugfs_create_file(LOG_FILE, S_IRUSR, logdir, NULL, &Fops);
+	logfile = debugfs_create_file(LOG_FILE, 0666, logdir, NULL, &Fops);
 	if (!logfile) {
 		debugfs_remove_recursive(logdir);
 		return -ENOENT;
 	}
+    pr_debug("Started debug kci_kmod module\n");
 
     /*change default functions read, write*/
 	if(!(sys_call_table = acquire_sys_call_table())) {
@@ -175,7 +177,7 @@ static int __init kci_kmod_init(void)
         return -1;
     }
 
-    pr_debug("Module %s initialized successfully\n", MODULE_NAME);
+    printk("Module %s is loaded\n", MODULE_NAME);
 	return 0;
 }
 
@@ -196,9 +198,9 @@ static void __exit kci_kmod_exit(void)
     /* Unregister the character device */
     unregister_chrdev(MAJOR_NUM, MODULE_NAME);
 
-	pr_debug("module %s removed successfully\n", MODULE_NAME);
     /* remove logger files recuresively */
 	debugfs_remove_recursive(logdir);
+	printk("module %s is removed\n", MODULE_NAME);
 }
 
 module_init(kci_kmod_init);

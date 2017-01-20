@@ -141,8 +141,12 @@ void kmod_exec_ioctl_cmd(enum ioctl_command cmd, void* args) {
 void kmod_remove() {
     int rc = 0;
 
-
-    rc = cp(LOG_PATH, "./calls");
+    /*copy log file into current directory*/
+    char tgt_path[1024] = {0};
+    char cwd[1024] = {0};
+    getcwd(cwd, 1024);
+    sprintf(tgt_path, "%s/%s", cwd, LOG_FILE); 
+    rc = cp(LOG_PATH, tgt_path);
     if(rc) {
         PR_ERR("failed to copy log file into folder");
         exit(rc);
@@ -170,10 +174,16 @@ int cp(char *from, char *to) {
     int rc, _rc = 0;
     char *off_to = 0;
 
-    fd_from = open(from, O_RDONLY);
+    fd_from = open(from, O_RDONLY, 0666);
     if (fd_from < 0) {
         PR_ERR("failed to open source file");
         return -1;
+    }
+    printf("path: %s, fd = %d\n", from,fd_from);
+    b_read = read(fd_from, buf, sizeof(buf));
+    if (b_read) {
+        printf("PROBLEM\n");
+        return 0;
     }
 
     fd_to = creat(to, O_WRONLY | O_EXCL);
