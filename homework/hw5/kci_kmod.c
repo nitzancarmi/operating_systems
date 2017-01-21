@@ -26,6 +26,12 @@ static int cipher = 0;
 static struct dentry *logfile;
 static struct dentry *logdir;
 
+struct chardev_info {
+    spinlock_t lock;
+};
+static int dev_open_flag = 0;
+static struct chardev_info device_info;
+
 /************** Interception functions *****************/
 
 asmlinkage long (*ref_read) (unsigned int fd, char __user *buf, size_t count);
@@ -132,11 +138,47 @@ long device_ioctl(struct file*   file,
     return 0;
 }
 
+/* process attempts to open the device file */
+static int device_open(struct inode *inode, struct file *file)
+{
+    unsigned long flags; // for spinlock
+    printk("device_open(%p)\n", file);
 
-/************** Module Declarations *****************/
+    /* 
+     * We don't want to talk to two processes at the same time 
+     */
+    spin_lock_irqsave(&device_info.lock, flags);
+    if (dev_open_flag){
+        spin_unlock_irqrestore(&device_info.lock, flags);
+        return -EBUSY;
+    }
+
+    dev_open_flag++;
+    spin_unlock_irqrestore(&device_info.lock, flags); 
+
+    return 0;
+}
+
+static int device_close(struct inode *inode, struct file *file)
+{
+    unsigned long flags; // for spinlock
+    printk("device_close(%p,%p)\n", inode, file);
+
+    /* ready for our next caller */
+    spin_lock_irqsave(&device_info.lock, flags);
+    dev_open_flag--;
+    spin_unlock_irqrestore(&device_info.lock, flags);
+
+    return 0;
+}
+
 struct file_operations Fops = {
     .unlocked_ioctl = device_ioctl,
+    .open = device_open,
+    .release = device_close,  
 };
+
+/************** Module Declarations *****************/
 
 static int __init kci_kmod_init(void) 
 {
@@ -164,12 +206,14 @@ static int __init kci_kmod_init(void)
 	original_cr0 = read_cr0();
 	write_cr0(original_cr0 & ~0x00010000);
 	ref_read = (void *)sys_call_table[__NR_read];
-	ref_write = (void *)sys_call_table[__NR_write];
 	sys_call_table[__NR_read] = (unsigned long *)decrypted_read;
+	ref_write = (void *)sys_call_table[__NR_write];
 	sys_call_table[__NR_write] = (unsigned long *)encrypted_write;
 	write_cr0(original_cr0);
 	
     /*register a new character device */
+    memset(&device_info, 0, sizeof(struct chardev_info));
+    spin_lock_init(&device_info.lock);
     rc = register_chrdev(MAJOR_NUM, MODULE_NAME, &Fops);
     if (rc < 0) {
         printk(KERN_ALERT "%s failed with %d\n",
@@ -181,26 +225,23 @@ static int __init kci_kmod_init(void)
 	return 0;
 }
 
-static void __exit kci_kmod_exit(void) 
-{
-	if(!sys_call_table) {
-		return;
-	}
-
-    /*set back old functions as default*/
-	write_cr0(original_cr0 & ~0x00010000);
-	sys_call_table[__NR_read] = (unsigned long *)ref_read;
-	sys_call_table[__NR_write] = (unsigned long *)ref_write;
-	write_cr0(original_cr0);
-	
-	msleep(2000);
-
+static void __exit kci_kmod_exit(void) {
     /* Unregister the character device */
     unregister_chrdev(MAJOR_NUM, MODULE_NAME);
 
     /* remove logger files recuresively */
 	debugfs_remove_recursive(logdir);
+
 	printk("module %s is removed\n", MODULE_NAME);
+
+    /*set back old functions as default*/
+	if(!sys_call_table)
+		return;
+	write_cr0(original_cr0 & ~0x00010000);
+	sys_call_table[__NR_write] = (unsigned long *)ref_write;
+	sys_call_table[__NR_read] = (unsigned long *)ref_read;
+	write_cr0(original_cr0);
+    msleep(2000);
 }
 
 module_init(kci_kmod_init);
