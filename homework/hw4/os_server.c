@@ -265,6 +265,7 @@ int main(int argc, char *argv[])
     int frk;
     key_fd = 0;
     sock_fd = 0;
+    int delete_fd = 0;
     struct stat key_st;
 
     //parse cmd line variables
@@ -286,7 +287,7 @@ int main(int argc, char *argv[])
             return rc;
         }
     }
-    else { //only check file validity
+    else { //check file validity
         if(stat(key_path, &key_st) || !key_st.st_size) {
             PR_ERR("bad key file stats");
             return -1;
@@ -342,6 +343,15 @@ int main(int argc, char *argv[])
             PR_ERR("failed to fork a process");
             goto cleanup;
         }
+
+        //close not needed connection
+        delete_fd = frk ? conn_fd : sock_fd;
+        rc = close(delete_fd);
+        if (rc) {
+            PR_ERR("Failed to close other's process connection");
+            goto cleanup;
+        }
+
         if (frk == 0) { //i.e child process
             sock_fd = conn_fd;
             return handle_client_req(key_path);
