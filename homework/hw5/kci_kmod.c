@@ -38,6 +38,7 @@ asmlinkage long (*ref_read) (unsigned int fd, char __user *buf, size_t count);
 asmlinkage long (*ref_write)(unsigned int fd, const char __user *buf, size_t count);
 
 int is_expected_file(int fd) {
+    pr_debug("NITZANC\n");
     return (gpid == current->pid &&
             gfd == fd);
 }

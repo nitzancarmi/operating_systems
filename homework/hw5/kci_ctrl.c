@@ -146,7 +146,7 @@ void kmod_remove() {
     char cwd[1024] = {0};
     getcwd(cwd, 1024);
     sprintf(tgt_path, "%s/%s", cwd, LOG_FILE); 
-    rc = cp(LOG_PATH, tgt_path);
+//    rc = cp(LOG_PATH, tgt_path); //TODO needs to be fixed!!!!!!!!!!
     if(rc) {
         PR_ERR("failed to copy log file into folder");
         exit(rc);
