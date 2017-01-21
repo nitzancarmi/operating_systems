@@ -13,6 +13,7 @@
 
 #include "kci.h" /*our header file*/ 
 
+#define MIN(x, y)       (((x) < (y)) ? (x) : (y))
 #define PR_ERR(msg)     printf("ERROR [%s, %d] %s : [%d] %s\n", __func__, __LINE__, msg, errno, strerror(errno)) 
 
 
@@ -146,7 +147,7 @@ void kmod_remove() {
     char cwd[1024] = {0};
     getcwd(cwd, 1024);
     sprintf(tgt_path, "%s/%s", cwd, LOG_FILE); 
-//    rc = cp(LOG_PATH, tgt_path); //TODO needs to be fixed!!!!!!!!!!
+    rc = cp(LOG_PATH, tgt_path);
     if(rc) {
         PR_ERR("failed to copy log file into folder");
         exit(rc);
@@ -172,44 +173,43 @@ int cp(char *from, char *to) {
     char buf[4096];
     ssize_t b_read, b_write;
     int rc, _rc = 0;
-    char *off_to = 0;
+    char *off_to = to;
+    size_t size;
 
     fd_from = open(from, O_RDONLY, 0666);
     if (fd_from < 0) {
         PR_ERR("failed to open source file");
         return -1;
     }
-    printf("path: %s, fd = %d\n", from,fd_from);
-    b_read = read(fd_from, buf, sizeof(buf));
-    if (b_read) {
-        printf("PROBLEM\n");
-        return 0;
-    }
 
-    fd_to = creat(to, O_WRONLY | O_EXCL);
+    fd_to = creat(to, 0666);
     if (fd_to < 0) {
-        PR_ERR("failed to open source file");
+        PR_ERR("failed to open target file");
         close(fd_from);
         return -1;
     }
 
-    while ((b_read = read(fd_from, buf, sizeof(buf))) > 0) {
-        do {
-            b_write = write(fd_to, off_to, (size_t)b_read);
+
+    while (1) {
+        b_read = read(fd_from, buf, sizeof(buf));
+        if(b_read < 0) {
+            PR_ERR("failed to read from file");
+            rc = -1;
+            goto cp_exit;
+        }
+        if (b_read == 0)
+            break; //reaches EOF        
+
+        while(b_read > 0) {
+            b_write = write(fd_to, buf,(size_t)b_read);
             if (b_write < 0) {
-                PR_ERR("failed to write to target file");
+                PR_ERR("failed to write to file");
                 rc = -1;
                 goto cp_exit;
             }
             b_read -= b_write;
-            off_to += b_write;
-        } while (b_read > 0);
+        }
     }
-    if (b_read < 0) {
-        PR_ERR("failed to read from source file");
-        rc = -1;
-    }
-
 
 cp_exit:
     _rc |= close(fd_from);
