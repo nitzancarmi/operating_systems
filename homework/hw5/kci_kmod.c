@@ -14,8 +14,11 @@
 #include "kci.h"            /*our shared header file*/
 #include <linux/debugfs.h>  /* for logging messages */
 
-#define LOG_WRITE_MSG(act,tot)  pr_debug("Write operation(PID: %d, FD: %d): %d bytes out of total %d were written to file\n", gpid, gfd, act, tot);
-#define LOG_READ_MSG(act,tot)  pr_debug("Read operation(PID: %d, FD: %d): %d bytes out of total %d were read from file\n", gpid, gfd, act, tot);
+#define BUF_SIZE        512 //(PAGE_SIZE << 2) //16KB buffer (assuming 4KB PAGE_SIZE)
+#define MIN(x, y)       (((x) < (y)) ? (x) : (y))
+
+//#define LOG_WRITE_MSG(act,tot)  pr_debug("Write operation(PID: %d, FD: %d): %d bytes out of total %d were written to file\n", gpid, gfd, act, tot);
+//#define LOG_READ_MSG(act,tot)  pr_debug("Read operation(PID: %d, FD: %d): %d bytes out of total %d were read from file\n", gpid, gfd, act, tot);
 
 unsigned long **sys_call_table;
 unsigned long original_cr0;
@@ -26,19 +29,27 @@ static int cipher = 0;
 static struct dentry *logfile;
 static struct dentry *logdir;
 
+static size_t dbgfs_buf_off;
+static char debugfs_buf[BUF_SIZE] = {0};
+
 struct chardev_info {
     spinlock_t lock;
 };
 static int dev_open_flag = 0;
 static struct chardev_info device_info;
 
+
+void pr_debugfs(char* msg, size_t msglen) {
+    size_t size = MIN(msglen, BUF_SIZE);
+	strncpy(debugfs_buf + dbgfs_buf_off, msg, msglen);
+	dbgfs_buf_off += size;
+}
 /************** Interception functions *****************/
 
 asmlinkage long (*ref_read) (unsigned int fd, char __user *buf, size_t count);
 asmlinkage long (*ref_write)(unsigned int fd, const char __user *buf, size_t count);
 
 int is_expected_file(int fd) {
-    pr_debug("NITZANC\n");
     return (gpid == current->pid &&
             gfd == fd);
 }
@@ -47,6 +58,7 @@ asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count)
 	int i;
     char c;
     int rc;
+    char msg[BUF_SIZE];
 
     //encrypt buffer for writing
     if(is_expected_file(fd) && cipher) {
@@ -59,8 +71,13 @@ asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count)
     }
 
     rc = ref_write(fd, buf, count);
-    if(is_expected_file(fd) && cipher)
-        LOG_WRITE_MSG(rc, (int)count);
+    if(is_expected_file(fd) && cipher) {
+        sprintf(msg, "Write operation: (PID %d, FD %d) "
+                     "%d bytes out of total %lu were written to file\n",
+                     gpid, gfd, rc, count);
+        pr_debug("%s\n", msg);
+        pr_debugfs(msg, strlen(msg));
+    }
 
     //decrypt back buffer so user won't notice any difference
     if(is_expected_file(fd) && cipher) {
@@ -77,10 +94,16 @@ asmlinkage long encrypted_write(unsigned int fd, char __user *buf, size_t count)
 asmlinkage long decrypted_read (unsigned int fd, char __user *buf, size_t count) {
 	int i, b_read;
 	char c;
+    char msg[BUF_SIZE];
 
     b_read = ref_read(fd, buf, count);
-    if(is_expected_file(fd) && cipher)
-        LOG_READ_MSG(b_read, (int)count);
+    if(is_expected_file(fd) && cipher) {
+        sprintf(msg, "Read operation: (PID %d, FD %d) "
+                     "%d bytes out of total %lu were read from file\n",
+                     gpid, gfd, b_read, count);
+        pr_debug("%s\n", msg);
+        pr_debugfs(msg, strlen(msg));
+}
 
     //decrypt buffer for expected file
     if(is_expected_file(fd) && cipher) {
@@ -132,7 +155,7 @@ long device_ioctl(struct file*   file,
         break;
     case IOCTL_CIPHER:
         cipher = (int)ioctl_param;
-        printk("ioctl: cipher %s\n", cipher ? "started":"stopped");
+        pr_debug("ioctl: cipher %s\n", cipher ? "started":"stopped");
         break;
     }    
 
@@ -173,10 +196,18 @@ static int device_close(struct inode *inode, struct file *file)
     return 0;
 }
 
-struct file_operations Fops = {
+static ssize_t debugfs_read(struct file *filp,
+		char *buffer,
+		size_t len,
+		loff_t *offset) {
+	return simple_read_from_buffer(buffer, len, offset, debugfs_buf, dbgfs_buf_off);
+}
+
+struct file_operations fops = {
     .unlocked_ioctl = device_ioctl,
     .open = device_open,
     .release = device_close,  
+	.read = debugfs_read,
 };
 
 /************** Module Declarations *****************/
@@ -192,7 +223,7 @@ static int __init kci_kmod_init(void)
 	if (!logdir)
 		return -ENOENT;
 
-	logfile = debugfs_create_file(LOG_FILE, 0666, logdir, NULL, &Fops);
+	logfile = debugfs_create_file(LOG_FILE, 0666, logdir, NULL, &fops);
 	if (!logfile) {
 		debugfs_remove_recursive(logdir);
 		return -ENOENT;
@@ -215,14 +246,14 @@ static int __init kci_kmod_init(void)
     /*register a new character device */
     memset(&device_info, 0, sizeof(struct chardev_info));
     spin_lock_init(&device_info.lock);
-    rc = register_chrdev(MAJOR_NUM, MODULE_NAME, &Fops);
+    rc = register_chrdev(MAJOR_NUM, MODULE_NAME, &fops);
     if (rc < 0) {
         printk(KERN_ALERT "%s failed with %d\n",
                "Sorry, registering the character device ", MAJOR_NUM);
         return -1;
     }
 
-    printk("Module %s is loaded\n", MODULE_NAME);
+    pr_debug("Module %s is loaded\n", MODULE_NAME);
 	return 0;
 }
 
@@ -233,7 +264,7 @@ static void __exit kci_kmod_exit(void) {
     /* remove logger files recuresively */
 	debugfs_remove_recursive(logdir);
 
-	printk("module %s is removed\n", MODULE_NAME);
+	pr_debug("module %s is removed\n", MODULE_NAME);
 
     /*set back old functions as default*/
 	if(!sys_call_table)
